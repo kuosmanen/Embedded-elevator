@@ -296,7 +296,9 @@ static void process_keypad(void)
 
     if (g_state == STATE_IDLE) {
         handle_idle_key(key);
-        lcd_show_idle();
+        if (g_state == STATE_IDLE) {
+            lcd_show_idle();
+        }
         return;
     }
 
