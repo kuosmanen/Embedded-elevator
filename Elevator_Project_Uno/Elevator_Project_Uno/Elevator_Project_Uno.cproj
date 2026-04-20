@@ -132,6 +132,9 @@
     <Compile Include="protocol.h">
       <SubType>compile</SubType>
     </Compile>
+    <Compile Include="tune.h">
+      <SubType>compile</SubType>
+    </Compile>
     <Compile Include="uno_twi.c">
       <SubType>compile</SubType>
     </Compile>

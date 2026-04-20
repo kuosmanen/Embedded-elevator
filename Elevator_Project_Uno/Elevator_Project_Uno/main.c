@@ -8,6 +8,7 @@
 #include "uno_twi.h"
 #include "buzzer.h"
 #include "protocol.h"
+#include "tune.h"
 
 /* UNO output allocation
  * D4  -> movement LED
@@ -36,6 +37,7 @@ static bool g_obstacle_blink_active = false;
 static uint8_t g_obstacle_toggle_count = 0;
 static uint32_t g_last_blink_ms = 0;
 
+/// Switching all status LEDs off
 static void leds_all_off(void)
 {
     MOVING_LED_PORT &= (uint8_t)~(1 << MOVING_LED_PIN);
@@ -44,6 +46,7 @@ static void leds_all_off(void)
     OBST_LED_PORT   &= (uint8_t)~(1 << OBST_LED_PIN);
 }
 
+/// Configuring all output LEDs and reset them to OFF
 static void outputs_init(void)
 {
     MOVING_LED_DDR |= (1 << MOVING_LED_PIN);
@@ -53,6 +56,7 @@ static void outputs_init(void)
     leds_all_off();
 }
 
+/// Starting obstacle blink pattern timing
 static void obstacle_blink_start(void)
 {
     g_obstacle_blink_active = true;
@@ -61,6 +65,7 @@ static void obstacle_blink_start(void)
     OBST_LED_PORT &= (uint8_t)~(1 << OBST_LED_PIN);
 }
 
+/// Blinking obstacle LED
 static void obstacle_blink_update(void)
 {
     uint32_t now;
@@ -82,34 +87,35 @@ static void obstacle_blink_update(void)
     }
 }
 
+/// Applying commands received from the MEGA master controller by setting LEDs and buzzer state
 static void apply_command(uint8_t command)
 {
     switch (command) {
         case UNO_CMD_IDLE:
             g_obstacle_blink_active = false;
             leds_all_off();
-            buzzer_stop();
+            buzzer_start_background();
             break;
 
         case UNO_CMD_MOVING:
             g_obstacle_blink_active = false;
             leds_all_off();
             MOVING_LED_PORT |= (1 << MOVING_LED_PIN);
-            buzzer_stop();
+            buzzer_start_background();
             break;
 
         case UNO_CMD_DOOR_OPEN:
             g_obstacle_blink_active = false;
             leds_all_off();
             OPEN_LED_PORT |= (1 << OPEN_LED_PIN);
-            buzzer_stop();
+            buzzer_start_background();
             break;
 
         case UNO_CMD_DOOR_CLOSING:
             g_obstacle_blink_active = false;
             leds_all_off();
             CLOSE_LED_PORT |= (1 << CLOSE_LED_PIN);
-            buzzer_stop();
+            buzzer_start_background();
             break;
 
         case UNO_CMD_OBSTACLE_START:
@@ -121,14 +127,14 @@ static void apply_command(uint8_t command)
         case UNO_CMD_OBSTACLE_STOP:
             g_obstacle_blink_active = false;
             OBST_LED_PORT &= (uint8_t)~(1 << OBST_LED_PIN);
-            buzzer_stop();
+            buzzer_start_background();
             break;
 
         case UNO_CMD_FAULT:
         default:
             g_obstacle_blink_active = false;
             leds_all_off();
-            buzzer_stop();
+            buzzer_start_background();
             break;
     }
 }

@@ -1,6 +1,7 @@
 #define F_CPU 16000000UL
 
 #include "buzzer.h"
+#include "tune.h"
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <stdbool.h>
@@ -9,22 +10,16 @@
 #define BUZZER_PORT PORTB
 #define BUZZER_PIN PB1   /* Arduino UNO D9 / OC1A */
 
-typedef struct note {
-    uint16_t frequency;
-    uint16_t duration_ms;
-} note_t;
-
-static const note_t alert_melody[] = {
-    {523, 180},
-    {659, 180},
-    {784, 180},
-    {659, 180},
-    {988, 260},
-    {0,   120}
-};
+typedef enum buzzer_mode {
+    BUZZER_MODE_OFF = 0,
+    BUZZER_MODE_BACKGROUND,
+    BUZZER_MODE_ALERT,
+} buzzer_mode_t;
 
 static volatile uint32_t g_millis = 0;
-static bool g_buzzer_enabled = false;
+static buzzer_mode_t g_mode = BUZZER_MODE_OFF;
+static const note_t *g_active_melody = 0;
+static uint8_t g_active_melody_len = 0u;
 static uint8_t g_note_index = 0;
 static uint32_t g_note_started_ms = 0;
 
@@ -41,6 +36,7 @@ void timer0_tick_init(void)
     TIMSK0 = (1 << OCIE0A);
 }
 
+/// Reading elapsed milliseconds
 uint32_t millis_get(void)
 {
     uint32_t value;
@@ -51,12 +47,14 @@ uint32_t millis_get(void)
     return value;
 }
 
+/// Disable timer1 OC1A output to silence buzzer pin
 static void timer1_disable_output(void)
 {
     TCCR1A &= (uint8_t)~((1 << COM1A1) | (1 << COM1A0));
     BUZZER_PORT &= (uint8_t)~(1 << BUZZER_PIN);
 }
 
+/// Set timer1 toggle frequency used for square-wave buzzer output
 static void timer1_set_frequency(uint16_t frequency)
 {
     uint32_t top;
@@ -87,35 +85,53 @@ void buzzer_init(void)
     timer1_disable_output();
 }
 
-void buzzer_start_alert(void)
+void buzzer_start_background(void)
 {
-    g_buzzer_enabled = true;
+    g_mode = BUZZER_MODE_BACKGROUND;
+    g_active_melody = UNO_BACKGROUND_TUNE;
+    g_active_melody_len = UNO_BACKGROUND_TUNE_LENGTH;
     g_note_index = 0u;
     g_note_started_ms = millis_get();
-    timer1_set_frequency(alert_melody[g_note_index].frequency);
+    timer1_set_frequency(g_active_melody[g_note_index].frequency_hz);
 }
 
+/// looping obstacle alert melody
+void buzzer_start_alert(void)
+{
+    g_mode = BUZZER_MODE_ALERT;
+    g_active_melody = UNO_ALERT_TUNE;
+    g_active_melody_len = UNO_ALERT_TUNE_LENGTH;
+    g_note_index = 0u;
+    g_note_started_ms = millis_get();
+    timer1_set_frequency(g_active_melody[g_note_index].frequency_hz);
+}
+
+/// Stopping buzzer and clearing active melody state
 void buzzer_stop(void)
 {
-    g_buzzer_enabled = false;
+    g_mode = BUZZER_MODE_OFF;
+    g_active_melody = 0;
+    g_active_melody_len = 0u;
     timer1_disable_output();
 }
 
+
 void buzzer_update(void)
+/* This must be done so that the buzzer can play two different tunes: alert and background (it uses the same timer)*/
 {
     uint32_t now;
 
-    if (!g_buzzer_enabled) {
+    if (g_mode == BUZZER_MODE_OFF || g_active_melody == 0 || g_active_melody_len == 0u) {
         return;
     }
 
     now = millis_get();
-    if ((now - g_note_started_ms) >= alert_melody[g_note_index].duration_ms) {
+    if ((now - g_note_started_ms) >= g_active_melody[g_note_index].duration_ms) {
         g_note_index++;
-        if (g_note_index >= (sizeof(alert_melody) / sizeof(alert_melody[0]))) {
+        if (g_note_index >= g_active_melody_len) {
             g_note_index = 0u;
         }
         g_note_started_ms = now;
-        timer1_set_frequency(alert_melody[g_note_index].frequency);
+        timer1_set_frequency(g_active_melody[g_note_index].frequency_hz);
     }
 }
