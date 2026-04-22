@@ -41,10 +41,6 @@ static uint8_t g_input_digits[2];
 static uint8_t g_input_len = 0;
 static uint8_t EEMEM saved_floor_eeprom;
 
-static bool queue_push(floor_queue_t *queue, uint8_t floor);
-static bool queue_pop(floor_queue_t *queue, uint8_t *floor);
-static bool queue_is_empty(const floor_queue_t *queue);
-
 static void lcd_show_idle(void);
 static void lcd_show_current_floor(const char *state_text);
 static void lcd_show_fault(void);
@@ -60,35 +56,6 @@ static void update_state_machine(uint32_t elapsed_ms);
 static uint8_t digits_to_floor(void);
 static bool is_digit(uint8_t key);
 
-
-static bool queue_push(floor_queue_t *queue, uint8_t floor)
-{
-    if (queue->count >= FLOOR_QUEUE_SIZE) {
-        return false;
-    }
-
-    queue->data[queue->tail] = floor;
-    queue->tail = (uint8_t)((queue->tail + 1u) % FLOOR_QUEUE_SIZE);
-    queue->count++;
-    return true;
-}
-
-static bool queue_pop(floor_queue_t *queue, uint8_t *floor)
-{
-    if (queue->count == 0u) {
-        return false;
-    }
-
-    *floor = queue->data[queue->head];
-    queue->head = (uint8_t)((queue->head + 1u) % FLOOR_QUEUE_SIZE);
-    queue->count--;
-    return true;
-}
-
-static bool queue_is_empty(const floor_queue_t *queue)
-{
-    return (queue->count == 0u);
-}
 
 static void lcd_print_line(uint8_t row, const char *text)
 {
