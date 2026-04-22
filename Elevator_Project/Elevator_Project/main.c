@@ -16,7 +16,6 @@
 #include "lcd_print_utils.h"
 #include "elevator_state.h"
 
-#define FLOOR_QUEUE_SIZE 10
 #define MOVE_STEP_MS 1000UL
 #define DOOR_OPEN_TIME_MS 3000UL
 #define DOOR_CLOSE_TIME_MS 2000UL

@@ -128,6 +128,9 @@
     <Compile Include="delay.h">
       <SubType>compile</SubType>
     </Compile>
+    <Compile Include="elevator_state.h">
+      <SubType>compile</SubType>
+    </Compile>
     <Compile Include="keypad.c">
       <SubType>compile</SubType>
     </Compile>
@@ -138,6 +141,12 @@
       <SubType>compile</SubType>
     </Compile>
     <Compile Include="lcd.h">
+      <SubType>compile</SubType>
+    </Compile>
+    <Compile Include="lcd_print_utils.c">
+      <SubType>compile</SubType>
+    </Compile>
+    <Compile Include="lcd_print_utils.h">
       <SubType>compile</SubType>
     </Compile>
     <Compile Include="main.c">
