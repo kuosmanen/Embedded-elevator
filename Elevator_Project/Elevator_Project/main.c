@@ -186,9 +186,13 @@ static void set_state(elevator_state_t new_state)
     }
 }
 
+/**
+ * A function that main.c uses to utilize the keypad functionality,
+ * including key input detection.
+ */
 static void process_keypad(void)
 {
-    uint8_t key = KEYPAD_GetKeyNonBlocking();
+    uint8_t key = KEYPAD_GetKey();
     if (key == 0u) {
         return;
     }
