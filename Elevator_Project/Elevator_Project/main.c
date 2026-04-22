@@ -13,13 +13,15 @@
 #include "mega_twi.h"
 #include "protocol.h"
 #include "queue_utils.h"
+#include "lcd_print_utils.h"
+#include "elevator_state.h"
 
 #define FLOOR_QUEUE_SIZE 10
 #define MOVE_STEP_MS 1000UL
 #define DOOR_OPEN_TIME_MS 3000UL
 #define DOOR_CLOSE_TIME_MS 2000UL
 #define FAULT_TIME_MS 1500UL
-#define LCD_BUFFER_SIZE 17
+
 
 typedef enum elevator_state {
     STATE_IDLE = 0,
@@ -31,21 +33,16 @@ typedef enum elevator_state {
     STATE_FAULT
 } elevator_state_t;
 
-static floor_queue_t g_queue;
-static elevator_state_t g_state = STATE_IDLE;
-static uint8_t g_current_floor = 0;
-static uint8_t g_target_floor = 0;
+floor_queue_t g_queue;
+elevator_state_t g_state = STATE_IDLE;
+uint8_t g_current_floor = 0;
+uint8_t g_target_floor = 0;
+uint8_t g_input_digits[2];
+uint8_t g_input_len = 0;
+
 static uint32_t g_state_time_ms = 0;
 static uint32_t g_move_time_ms = 0;
-static uint8_t g_input_digits[2];
-static uint8_t g_input_len = 0;
 static uint8_t EEMEM saved_floor_eeprom;
-
-static void lcd_show_idle(void);
-static void lcd_show_current_floor(const char *state_text);
-static void lcd_show_fault(void);
-static void lcd_show_obstacle(void);
-static void lcd_show_queue_status(void);
 
 static void handle_idle_key(uint8_t key);
 static void handle_background_queue_key(uint8_t key);
@@ -56,70 +53,6 @@ static void update_state_machine(uint32_t elapsed_ms);
 static uint8_t digits_to_floor(void);
 static bool is_digit(uint8_t key);
 
-
-static void lcd_print_line(uint8_t row, const char *text)
-{
-    char buffer[LCD_BUFFER_SIZE];
-    uint8_t i = 0;
-
-    while ((text[i] != '\0') && (i < 16u)) {
-        buffer[i] = text[i];
-        i++;
-    }
-    while (i < 16u) {
-        buffer[i++] = ' ';
-    }
-    buffer[16] = '\0';
-
-    lcd_gotoxy(0, row);
-    lcd_puts(buffer);
-}
-
-static void lcd_show_idle(void)
-{
-    char line2[LCD_BUFFER_SIZE];
-    lcd_print_line(0, "Choose floor:# ");
-
-    if (g_input_len == 0u) {
-        snprintf(line2, sizeof(line2), "Current:%02u Q:%u", g_current_floor, g_queue.count);
-    } else if (g_input_len == 1u) {
-        snprintf(line2, sizeof(line2), "Input:%u_ Q:%u   ", g_input_digits[0], g_queue.count);
-    } else {
-        snprintf(line2, sizeof(line2), "Input:%u%u Q:%u   ", g_input_digits[0], g_input_digits[1], g_queue.count);
-    }
-
-    lcd_print_line(1, line2);
-}
-
-static void lcd_show_current_floor(const char *state_text)
-{
-    char line1[LCD_BUFFER_SIZE];
-    char line2[LCD_BUFFER_SIZE];
-
-    snprintf(line1, sizeof(line1), "%s        ", state_text);
-    snprintf(line2, sizeof(line2), "Cur:%02u Tar:%02u Q:%u", g_current_floor, g_target_floor, g_queue.count);
-    lcd_print_line(0, line1);
-    lcd_print_line(1, line2);
-}
-
-static void lcd_show_fault(void)
-{
-    lcd_print_line(0, "Same floor      ");
-    lcd_print_line(1, "Choose another  ");
-}
-
-static void lcd_show_obstacle(void)
-{
-    lcd_print_line(0, "Obstacle detect ");
-    lcd_print_line(1, "Press any key   ");
-}
-
-static void lcd_show_queue_status(void)
-{
-    char line[LCD_BUFFER_SIZE];
-    snprintf(line, sizeof(line), "Queued requests:%u", g_queue.count);
-    lcd_print_line(1, line);
-}
 
 static uint8_t digits_to_floor(void)
 {
