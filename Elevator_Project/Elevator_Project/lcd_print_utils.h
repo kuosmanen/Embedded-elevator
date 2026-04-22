@@ -22,6 +22,5 @@ void lcd_show_idle(void);
 void lcd_show_current_floor(const char *state_text);
 void lcd_show_fault(void);
 void lcd_show_obstacle(void);
-void lcd_show_queue_status(void);
 
 #endif

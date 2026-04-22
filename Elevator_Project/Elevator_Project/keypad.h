@@ -13,11 +13,20 @@
 #define KEYSCAN_UPPER_CAP 4
 #define KEYSCAN_INITIAL 0
 
+/**
+ * Initializing the keypad based on its physical
+ * layout.
+ */
 void KEYPAD_Init(void);
-void KEYPAD_WaitForKeyRelease(void);
-void KEYPAD_WaitForKeyPress(void);
+
+/*
+ * The core functionality for detecting what key has been pressed from keypad
+ * 1) Ensuring a key has been pressed (and released)
+ * 2) Precise scanning to detect the pressed key
+ * 3) Decoding the key for the value
+ * 
+ * Returns the value of the key that has been pressed.
+ */
 uint8_t KEYPAD_GetKey(void);
-uint8_t KEYPAD_GetKeyNonBlocking(void);
-bool keypressIsDetected(uint8_t key);
 
 #endif
