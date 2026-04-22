@@ -57,10 +57,3 @@ void lcd_show_obstacle(void)
     lcd_print_line(0, "Obstacle detect ");
     lcd_print_line(1, "Press any key   ");
 }
-
-void lcd_show_queue_status(void)
-{
-    char line[LCD_BUFFER_SIZE];
-    snprintf(line, sizeof(line), "Queued requests:%u", g_queue.count);
-    lcd_print_line(1, line);
-}
