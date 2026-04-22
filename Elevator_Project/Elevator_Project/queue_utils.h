@@ -1,3 +1,6 @@
+#ifndef QUEUE_UTILS_H
+#define QUEUE_UTILS_H
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -13,3 +16,9 @@ typedef struct floor_queue {
 } floor_queue_t;
 
 void queue_init(floor_queue_t *queue);
+
+bool queue_push(floor_queue_t *queue, uint8_t floor);
+bool queue_pop(floor_queue_t *queue, uint8_t *floor);
+bool queue_is_empty(const floor_queue_t *queue);
+
+#endif
