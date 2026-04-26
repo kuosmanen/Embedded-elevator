@@ -2,6 +2,7 @@
 
 #include <avr/io.h>
 #include <avr/interrupt.h>
+#include <avr/sleep.h>
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -36,6 +37,17 @@
 static bool g_obstacle_blink_active = false;
 static uint8_t g_obstacle_toggle_count = 0;
 static uint32_t g_last_blink_ms = 0;
+static bool g_low_power_mode = false;
+
+static void exit_low_power_mode(void)
+{
+    if (!g_low_power_mode) {
+        return;
+    }
+
+    timer0_tick_start();
+    g_low_power_mode = false;
+}
 
 /// Switching all status LEDs off
 static void leds_all_off(void)
@@ -94,10 +106,13 @@ static void apply_command(uint8_t command)
         case UNO_CMD_IDLE:
             g_obstacle_blink_active = false;
             leds_all_off();
-            buzzer_start_background();
+            buzzer_stop();
+            timer0_tick_stop();
+            g_low_power_mode = true;
             break;
 
         case UNO_CMD_MOVING:
+            exit_low_power_mode();
             g_obstacle_blink_active = false;
             leds_all_off();
             MOVING_LED_PORT |= (1 << MOVING_LED_PIN);
@@ -105,6 +120,7 @@ static void apply_command(uint8_t command)
             break;
 
         case UNO_CMD_DOOR_OPEN:
+            exit_low_power_mode();
             g_obstacle_blink_active = false;
             leds_all_off();
             OPEN_LED_PORT |= (1 << OPEN_LED_PIN);
@@ -112,6 +128,7 @@ static void apply_command(uint8_t command)
             break;
 
         case UNO_CMD_DOOR_CLOSING:
+            exit_low_power_mode();
             g_obstacle_blink_active = false;
             leds_all_off();
             CLOSE_LED_PORT |= (1 << CLOSE_LED_PIN);
@@ -119,12 +136,14 @@ static void apply_command(uint8_t command)
             break;
 
         case UNO_CMD_OBSTACLE_START:
+            exit_low_power_mode();
             leds_all_off();
             obstacle_blink_start();
             buzzer_start_alert();
             break;
 
         case UNO_CMD_OBSTACLE_STOP:
+            exit_low_power_mode();
             g_obstacle_blink_active = false;
             OBST_LED_PORT &= (uint8_t)~(1 << OBST_LED_PIN);
             buzzer_start_background();
@@ -132,6 +151,7 @@ static void apply_command(uint8_t command)
 
         case UNO_CMD_FAULT:
         default:
+            exit_low_power_mode();
             g_obstacle_blink_active = false;
             leds_all_off();
             buzzer_stop();//silent if fault
@@ -147,12 +167,20 @@ int main(void)
 	buzzer_init();
 	timer0_tick_init();
 	twi_slave_init(ELEVATOR_TWI_SLAVE_ADDRESS);
+    set_sleep_mode(SLEEP_MODE_IDLE);
 	sei();
 
 	while (1) {
 		if (twi_slave_receive_byte(&command)) {
 			apply_command(command);
 		}
+
+        if (g_low_power_mode) {
+            sleep_enable();
+            sleep_cpu();
+            sleep_disable();
+            continue;
+        }
 
 		obstacle_blink_update();
 		buzzer_update();

@@ -2,6 +2,8 @@
 
 #include <avr/io.h>
 #include <avr/eeprom.h>
+#include <avr/interrupt.h>
+#include <avr/sleep.h>
 #include <util/delay.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -42,6 +44,7 @@ uint8_t g_input_len = 0;
 static uint32_t g_state_time_ms = 0;
 static uint32_t g_move_time_ms = 0;
 static uint8_t EEMEM saved_floor_eeprom;
+static volatile bool g_keypad_wake_pending = false;
 
 static void handle_idle_key(uint8_t key);
 static void handle_background_queue_key(uint8_t key);
@@ -51,6 +54,85 @@ static void process_keypad(void);
 static void update_state_machine(uint32_t elapsed_ms);
 static uint8_t digits_to_floor(void);
 static bool is_digit(uint8_t key);
+static void keypad_wakeup_interrupt_init(void);
+static bool can_enter_low_power(void);
+static void enter_low_power_until_keypad(void);
+
+ISR(PCINT2_vect)
+{
+    g_keypad_wake_pending = true;
+}
+
+static void keypad_wakeup_interrupt_init(void)
+{
+    /* PK0..PK3 are keypad column inputs and are PCINT16..PCINT19 on ATmega2560 */
+    PCMSK2 |= (1 << PCINT16) | (1 << PCINT17) | (1 << PCINT18) | (1 << PCINT19);
+    PCIFR |= (1 << PCIF2);
+    PCICR |= (1 << PCIE2);
+}
+
+static bool can_enter_low_power(void)
+{
+    return (g_state == STATE_IDLE) && queue_is_empty(&g_queue) && (g_input_len == 0u);
+}
+
+static void enter_low_power_until_keypad(void)
+{
+    uint8_t adcsra_backup;
+    uint8_t acsr_backup;
+    uint8_t prr0_backup;
+    uint8_t prr1_backup;
+
+    /* If a key is already held, skip sleep and handle it immediately. */
+    if ((M_COL & 0x0Fu) != 0x0Fu) {
+        return;
+    }
+
+    lcd_command(LCD_DISP_OFF);
+
+    g_keypad_wake_pending = false;
+
+    adcsra_backup = ADCSRA;
+    acsr_backup = ACSR;
+    prr0_backup = PRR0;
+    prr1_backup = PRR1;
+
+    /* Disable analog blocks and clock-gate unused peripherals during sleep. */
+    ADCSRA &= (uint8_t)~(1 << ADEN);
+    ACSR |= (1 << ACD);
+    PRR0 = 0xFFu;
+    PRR1 = 0xFFu;
+
+    set_sleep_mode(SLEEP_MODE_PWR_DOWN);
+    sleep_enable();
+
+    cli();
+    if ((M_COL & 0x0Fu) == 0x0Fu) {
+#if defined(BODS) && defined(BODSE)
+        sleep_bod_disable();
+#endif
+        sei();
+        sleep_cpu();
+    } else {
+        sei();
+    }
+
+    sleep_disable();
+
+    PRR0 = prr0_backup;
+    PRR1 = prr1_backup;
+    ACSR = acsr_backup;
+    ADCSRA = adcsra_backup;
+
+    lcd_command(LCD_DISP_ON);
+    lcd_show_idle();
+
+    if (g_keypad_wake_pending) {
+        _delay_ms(15);
+    }
+
+    PCIFR |= (1 << PCIF2);
+}
 
 
 static uint8_t digits_to_floor(void)
@@ -285,6 +367,7 @@ int main(void)
     uint8_t restored_floor;
 
     KEYPAD_Init();
+    keypad_wakeup_interrupt_init();
     lcd_init(LCD_DISP_ON);
     lcd_clrscr();
     twi_master_init();
@@ -303,8 +386,16 @@ int main(void)
     lcd_print_line(1, "Floor restored  ");
     _delay_ms(1200);
     set_state(STATE_IDLE);
+    sei();
 
     while (1) {
+        if (can_enter_low_power()) {
+            enter_low_power_until_keypad();
+            process_keypad();
+            update_state_machine(0u);
+            continue;
+        }
+
         process_keypad();
         update_state_machine(50u);
         _delay_ms(50);

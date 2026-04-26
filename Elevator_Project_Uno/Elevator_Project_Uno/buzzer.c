@@ -35,7 +35,17 @@ void timer0_tick_init(void)
     TCCR0A = (1 << WGM01);
     TCCR0B = (1 << CS01) | (1 << CS00); /* prescaler 64 */
     OCR0A = 249;                        /* 1 ms tick */
+    timer0_tick_start();
+}
+
+void timer0_tick_start(void)
+{
     TIMSK0 = (1 << OCIE0A);
+}
+
+void timer0_tick_stop(void)
+{
+    TIMSK0 &= (uint8_t)~(1 << OCIE0A);
 }
 
 /// Reading elapsed milliseconds
