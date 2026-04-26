@@ -120,7 +120,7 @@ static void handle_background_queue_key(uint8_t key)
             queue_push(&g_queue, floor);
         }
         buffered_len = 0;
-    } else if (key == "A") {
+    } else if (key == 'A') {
         queue_reset(&g_queue);
     } else if (g_state == STATE_OBSTACLE_DETECTION) {
         set_state(STATE_DOOR_CLOSING);
