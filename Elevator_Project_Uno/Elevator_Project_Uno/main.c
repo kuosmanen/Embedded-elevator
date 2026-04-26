@@ -11,6 +11,8 @@
 #include "protocol.h"
 #include "tune.h"
 
+#define LOW_POWER_DELAY_MS 10000UL //10 seconds of idling before power saving mode
+
 /* UNO output allocation
  * D4  -> movement LED
  * D5  -> door open LED
@@ -38,9 +40,13 @@ static bool g_obstacle_blink_active = false;
 static uint8_t g_obstacle_toggle_count = 0;
 static uint32_t g_last_blink_ms = 0;
 static bool g_low_power_mode = false;
+static bool g_low_power_pending = false;
+static uint32_t g_low_power_requested_ms = 0;
 
 static void exit_low_power_mode(void)
 {
+    g_low_power_pending = false;
+
     if (!g_low_power_mode) {
         return;
     }
@@ -107,8 +113,8 @@ static void apply_command(uint8_t command)
             g_obstacle_blink_active = false;
             leds_all_off();
             buzzer_stop();
-            timer0_tick_stop();
-            g_low_power_mode = true;
+            g_low_power_requested_ms = millis_get();
+            g_low_power_pending = true;
             break;
 
         case UNO_CMD_MOVING:
@@ -174,6 +180,12 @@ int main(void)
 		if (twi_slave_receive_byte(&command)) {
 			apply_command(command);
 		}
+
+        if (g_low_power_pending && ((millis_get() - g_low_power_requested_ms) >= LOW_POWER_DELAY_MS)) {
+            g_low_power_pending = false;
+            timer0_tick_stop();
+            g_low_power_mode = true;
+        }
 
         if (g_low_power_mode) {
             sleep_enable();
