@@ -134,7 +134,7 @@ static void apply_command(uint8_t command)
         default:
             g_obstacle_blink_active = false;
             leds_all_off();
-            buzzer_start_background();
+            buzzer_stop();//silent if fault
             break;
     }
 }
