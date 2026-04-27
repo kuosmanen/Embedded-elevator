@@ -444,13 +444,20 @@ int main(void)
             enter_low_power_until_keypad();
 
             /*
-            * The wake key is only used to wake the device.
-            * Do not process it as a floor input.
+            * The wake key is only used to wake the Mega.
+            * It should not also become floor input.
             */
             mark_activity();
 
             /*
-            * Prevent immediate re-sleep caused by key release or bounce.
+            * Tell the Uno that the system is awake and idle again.
+            * The Uno uses UNO_CMD_IDLE to start/continue background music
+            * and restart its own low-power countdown.
+            */
+            twi_master_send_byte(ELEVATOR_TWI_SLAVE_ADDRESS, UNO_CMD_IDLE);
+
+            /*
+            * Prevent immediate re-sleep after key release/bounce.
             */
             g_sleep_lockout_ms = POST_WAKE_LOCKOUT_MS;
 
@@ -459,6 +466,15 @@ int main(void)
 
         key_activity = process_keypad();
         update_state_machine(50u);
+
+        /*
+        * If the user pressed a key but the elevator is still idle,
+        * notify the Uno too. This keeps the background music alive while
+        * the user is entering a floor number before pressing #.
+        */
+        if (key_activity && (g_state == STATE_IDLE)) {
+            twi_master_send_byte(ELEVATOR_TWI_SLAVE_ADDRESS, UNO_CMD_IDLE);
+        }
 
         if (g_sleep_lockout_ms >= 50u) {
             g_sleep_lockout_ms -= 50u;
