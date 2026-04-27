@@ -159,8 +159,8 @@ static void apply_command(uint8_t command)
             g_low_power_requested_ms = millis_get();
             g_low_power_pending = true;
             break;
-
-        default: //UNO_CMD_FAULT = 6
+        case UNO_CMD_FAULT:
+        default:
             g_obstacle_blink_active = false;
             leds_all_off();
             buzzer_stop();//silent if fault
