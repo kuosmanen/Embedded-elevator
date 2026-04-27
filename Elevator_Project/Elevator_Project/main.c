@@ -233,6 +233,7 @@ static void set_state(elevator_state_t new_state)
     g_state = new_state;
     g_state_time_ms = 0;
     g_move_time_ms = 0;
+    g_inactivity_time_ms = 0;
 
     switch (g_state) {
         case STATE_IDLE:

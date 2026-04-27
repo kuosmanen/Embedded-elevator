@@ -47,11 +47,12 @@ static void exit_low_power_mode(void)
 {
     g_low_power_pending = false;
 
+    timer0_tick_start();
+
     if (!g_low_power_mode) {
         return;
     }
 
-    timer0_tick_start();
     g_low_power_mode = false;
 }
 
