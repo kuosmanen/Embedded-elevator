@@ -26,7 +26,6 @@
 #define POST_WAKE_LOCKOUT_MS 500UL
 #define WAKE_RELEASE_TIMEOUT_MS 1200UL
 
-
 typedef enum elevator_state {
     STATE_IDLE = 0,
     STATE_GOING_UP,
@@ -104,7 +103,8 @@ static void enter_low_power_until_keypad(void)
     M_ROW = 0x0Fu;
     _delay_ms(2);
 
-    /* If a key is already held, skip sleep. This prevents sleeping immediately
+    /*
+     * If a key is already held, skip sleep. This prevents sleeping immediately
      * while a release/bounce is still visible on the keypad columns.
      */
     if ((M_COL & 0x0Fu) != 0x0Fu) {
@@ -170,12 +170,11 @@ static void enter_low_power_until_keypad(void)
     mark_activity();
 }
 
-
 static uint8_t digits_to_floor(void)
 {
-	return g_input_len == 1u
-		? g_input_digits[0]
-		: (uint8_t)(g_input_digits[0] * 10u + g_input_digits[1]);
+    return g_input_len == 1u
+        ? g_input_digits[0]
+        : (uint8_t)(g_input_digits[0] * 10u + g_input_digits[1]);
 }
 
 static bool is_digit(uint8_t key)
@@ -433,9 +432,12 @@ int main(void)
         bool key_activity;
 
         /*
-         * Only enter low power after a real inactivity timeout.
-         * The earlier version slept immediately whenever the system was idle,
-         * the request queue was empty and no digits were currently typed.
+         * Only enter low power after:
+         * - elevator is idle
+         * - queue is empty
+         * - no floor digits are currently typed
+         * - inactivity timeout has elapsed
+         * - post-wake lockout has ended
          */
         if ((g_sleep_lockout_ms == 0u) &&
             can_enter_low_power() &&
@@ -444,21 +446,14 @@ int main(void)
             enter_low_power_until_keypad();
 
             /*
-            * The wake key is only used to wake the Mega.
-            * It should not also become floor input.
-            */
+             * The wake key only wakes the MEGA. It should not also become a
+             * floor input. The UNO still needs a command so it can resume the
+             * background melody and restart its own idle sleep countdown.
+             */
             mark_activity();
-
-            /*
-            * Tell the Uno that the system is awake and idle again.
-            * The Uno uses UNO_CMD_IDLE to start/continue background music
-            * and restart its own low-power countdown.
-            */
             twi_master_send_byte(ELEVATOR_TWI_SLAVE_ADDRESS, UNO_CMD_IDLE);
 
-            /*
-            * Prevent immediate re-sleep after key release/bounce.
-            */
+            /* Prevent immediate re-sleep after key release/bounce. */
             g_sleep_lockout_ms = POST_WAKE_LOCKOUT_MS;
 
             continue;
@@ -468,12 +463,19 @@ int main(void)
         update_state_machine(50u);
 
         /*
-        * If the user pressed a key but the elevator is still idle,
-        * notify the Uno too. This keeps the background music alive while
-        * the user is entering a floor number before pressing #.
-        */
+         * If the user pressed keys while the elevator is still idle, keep the
+         * UNO background melody synchronized with the MEGA activity state.
+         *
+         * When no digits are buffered, UNO_CMD_IDLE starts/keeps the melody and
+         * starts the UNO idle low-power countdown. When digits are buffered,
+         * UNO_CMD_BACKGROUND keeps the melody running without starting sleep.
+         */
         if (key_activity && (g_state == STATE_IDLE)) {
-            twi_master_send_byte(ELEVATOR_TWI_SLAVE_ADDRESS, UNO_CMD_IDLE);
+            if (can_enter_low_power()) {
+                twi_master_send_byte(ELEVATOR_TWI_SLAVE_ADDRESS, UNO_CMD_IDLE);
+            } else {
+                twi_master_send_byte(ELEVATOR_TWI_SLAVE_ADDRESS, UNO_CMD_BACKGROUND);
+            }
         }
 
         if (g_sleep_lockout_ms >= 50u) {

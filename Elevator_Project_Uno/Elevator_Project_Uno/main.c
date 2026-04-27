@@ -11,7 +11,7 @@
 #include "protocol.h"
 #include "tune.h"
 
-#define LOW_POWER_DELAY_MS 10000UL //10 seconds of idling before power saving mode
+#define LOW_POWER_DELAY_MS 10000UL /* 10 seconds of idling before power saving mode */
 
 /* UNO output allocation
  * D3  -> movement LED
@@ -45,8 +45,8 @@ static uint32_t g_low_power_requested_ms = 0;
 
 static void exit_low_power_mode(void)
 {
+    /* Any command from the MEGA means the UNO is active again. */
     g_low_power_pending = false;
-
     timer0_tick_start();
 
     if (!g_low_power_mode) {
@@ -84,7 +84,7 @@ static void obstacle_blink_start(void)
     OBST_LED_PORT &= (uint8_t)~(1 << OBST_LED_PIN);
 }
 
-/// Blinking obstacle LED
+/// Blinking obstacle LED three times
 static void obstacle_blink_update(void)
 {
     uint32_t now;
@@ -109,8 +109,7 @@ static void obstacle_blink_update(void)
 /// Applying commands received from the MEGA master controller by setting LEDs and buzzer state
 static void apply_command(uint8_t command)
 {
-    //making sure timing is live and the CPU is out of low-power before processing commands
-     
+    /* Make sure timing is live and the CPU is out of low-power before processing commands. */
     exit_low_power_mode();
 
     switch (command) {
@@ -119,79 +118,118 @@ static void apply_command(uint8_t command)
             leds_all_off();
 
             /*
-            * Do not stop the background jingle here.
-            * The elevator is idle, but it has not entered low-power mode yet.
-            * Let the music continue until the actual sleep timeout happens.
-            */
+             * The elevator is awake but idle. The background melody should
+             * continue during the idle delay, but the UNO may enter low-power
+             * if no new command arrives for LOW_POWER_DELAY_MS.
+             */
             buzzer_start_background();
-
             g_low_power_requested_ms = millis_get();
             g_low_power_pending = true;
+            break;
+
+        case UNO_CMD_BACKGROUND:
+            g_obstacle_blink_active = false;
+            leds_all_off();
+
+            /*
+             * System is awake/being used, for example while the user is typing
+             * a floor number. Keep the background melody running, but do not
+             * start the UNO sleep countdown from this command.
+             */
+            buzzer_start_background();
+            g_low_power_pending = false;
             break;
 
         case UNO_CMD_MOVING:
             g_obstacle_blink_active = false;
             leds_all_off();
             MOVING_LED_PORT |= (1 << MOVING_LED_PIN);
+            buzzer_start_background();
+            g_low_power_pending = false;
             break;
 
         case UNO_CMD_DOOR_OPEN:
             g_obstacle_blink_active = false;
             leds_all_off();
             OPEN_LED_PORT |= (1 << OPEN_LED_PIN);
+            buzzer_start_background();
+            g_low_power_pending = false;
             break;
 
         case UNO_CMD_DOOR_CLOSING:
             g_obstacle_blink_active = false;
             leds_all_off();
             CLOSE_LED_PORT |= (1 << CLOSE_LED_PIN);
+            buzzer_start_background();
+            g_low_power_pending = false;
             break;
 
         case UNO_CMD_OBSTACLE_START:
             leds_all_off();
             obstacle_blink_start();
+
+            /* Obstacle alert temporarily replaces the background melody. */
             buzzer_start_alert();
+            g_low_power_pending = false;
             break;
 
         case UNO_CMD_OBSTACLE_STOP:
             g_obstacle_blink_active = false;
             OBST_LED_PORT &= (uint8_t)~(1 << OBST_LED_PIN);
+
+            /* After the obstacle is cleared, resume the background melody. */
             buzzer_start_background();
+            g_low_power_pending = false;
             break;
 
         case UNO_CMD_FAULT:
+            g_obstacle_blink_active = false;
+            leds_all_off();
+
+            /* Background melody is intended to be non-stop while awake. */
+            buzzer_start_background();
+            g_low_power_pending = false;
+            break;
+
         default:
             g_obstacle_blink_active = false;
             leds_all_off();
-            buzzer_stop();//silent if fault
+            buzzer_stop();
+            g_low_power_pending = false;
             break;
     }
 }
 
 int main(void)
 {
-	uint8_t command;
+    uint8_t command;
 
-	outputs_init();
-	buzzer_init();
-	timer0_tick_init();
-	twi_slave_init(ELEVATOR_TWI_SLAVE_ADDRESS);
+    outputs_init();
+    buzzer_init();
+    timer0_tick_init();
+    twi_slave_init(ELEVATOR_TWI_SLAVE_ADDRESS);
     set_sleep_mode(SLEEP_MODE_IDLE);
-	sei();
+    sei();
 
-	while (1) {
-		if (twi_slave_receive_byte(&command)) {
-			apply_command(command);
-		}
+    /*
+     * Start background music immediately when the UNO program starts.
+     * If the MEGA first sends UNO_CMD_IDLE, this same countdown is simply
+     * restarted from that command.
+     */
+    buzzer_start_background();
+    g_low_power_requested_ms = millis_get();
+    g_low_power_pending = true;
+
+    while (1) {
+        if (twi_slave_receive_byte(&command)) {
+            apply_command(command);
+        }
 
         if (g_low_power_pending &&
             ((millis_get() - g_low_power_requested_ms) >= LOW_POWER_DELAY_MS)) {
             g_low_power_pending = false;
 
-            /*
-            * Now the Uno is actually entering low-power mode,
-            * so this is the correct time to stop the music.
-            */
+            /* Music must not play while the UNO is in low-power mode. */
             buzzer_stop();
 
             timer0_tick_stop();
@@ -205,7 +243,7 @@ int main(void)
             continue;
         }
 
-		obstacle_blink_update();
-		buzzer_update();
-	}
+        obstacle_blink_update();
+        buzzer_update();
+    }
 }

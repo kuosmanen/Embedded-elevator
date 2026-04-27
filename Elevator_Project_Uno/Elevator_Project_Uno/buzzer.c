@@ -103,13 +103,18 @@ void buzzer_init(void)
 
 void buzzer_start_background(void)
 {
+    // If the background melody is already playing, do not restart it.
+    if (g_mode == BUZZER_MODE_BACKGROUND) {
+        return;
+    }
+
     /* loading background tune */
     g_mode = BUZZER_MODE_BACKGROUND;
     g_active_melody = UNO_BACKGROUND_TUNE;
     g_active_melody_len = UNO_BACKGROUND_TUNE_LENGTH;
     g_note_index = 0u;
-    g_note_started_ms = millis_get(); // start time
-    timer1_set_frequency(g_active_melody[g_note_index].frequency_hz); // playing first note
+    g_note_started_ms = millis_get();
+    timer1_set_frequency(g_active_melody[g_note_index].frequency_hz);
 }
 
 /// doing the same for the obstacle alert melody
