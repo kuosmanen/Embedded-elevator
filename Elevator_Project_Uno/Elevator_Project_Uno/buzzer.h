@@ -6,6 +6,12 @@
 /// Initializes timer0 as 1 ms system tick used by melody sequencing.
 void timer0_tick_init(void);
 
+/// Enables timer0 compare interrupt tick.
+void timer0_tick_start(void);
+
+/// Disables timer0 compare interrupt tick.
+void timer0_tick_stop(void);
+
 /// Returns elapsed milliseconds from timer0 tick counter.
 uint32_t millis_get(void);
 

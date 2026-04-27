@@ -1,5 +1,9 @@
 #include "uno_twi.h"
 #include <avr/io.h>
+#include <avr/interrupt.h>
+
+static volatile uint8_t g_rx_pending = 0u;
+static volatile uint8_t g_rx_data = 0u;
 
 /*
  * Polling-based TWI slave receive.
@@ -8,16 +12,28 @@
 void twi_slave_init(uint8_t slave_address)
 {
     TWAR = (uint8_t)(slave_address << 1);
-    TWCR = (1 << TWEA) | (1 << TWEN) | (1 << TWINT);
+    TWCR = (1 << TWEA) | (1 << TWEN) | (1 << TWIE) | (1 << TWINT);
 }
 
 uint8_t twi_slave_receive_byte(uint8_t *data)
 {
-    uint8_t status;
+    uint8_t sreg;
 
-    if (!(TWCR & (1 << TWINT))) {
+    if (g_rx_pending == 0u) {
         return 0u;
     }
+
+    sreg = SREG;
+    cli();
+    *data = g_rx_data;
+    g_rx_pending = 0u;
+    SREG = sreg;
+    return 1u;
+}
+
+ISR(TWI_vect)
+{
+    uint8_t status;
 
     status = (uint8_t)(TWSR & 0xF8u);
 
@@ -26,24 +42,26 @@ uint8_t twi_slave_receive_byte(uint8_t *data)
         case 0x68: /* arbitration lost, own SLA+W received */
         case 0x70: /* general call received */
         case 0x78:
-            TWCR = (1 << TWEA) | (1 << TWEN) | (1 << TWINT);
-            return 0u;
+            TWCR = (1 << TWEA) | (1 << TWEN) | (1 << TWIE) | (1 << TWINT);
+            return;
 
         case 0x80: /* data received, ACK returned */
         case 0x90: /* general call data received */
-            *data = TWDR;
-            TWCR = (1 << TWEA) | (1 << TWEN) | (1 << TWINT);
-            return 1u;
+            g_rx_data = TWDR;
+            g_rx_pending = 1u;
+            TWCR = (1 << TWEA) | (1 << TWEN) | (1 << TWIE) | (1 << TWINT);
+            return;
 
         case 0x88: /* data received, NACK returned */
         case 0x98:
-            *data = TWDR;
-            TWCR = (1 << TWEA) | (1 << TWEN) | (1 << TWINT);
-            return 1u;
+            g_rx_data = TWDR;
+            g_rx_pending = 1u;
+            TWCR = (1 << TWEA) | (1 << TWEN) | (1 << TWIE) | (1 << TWINT);
+            return;
 
         case 0xA0: /* STOP or repeated START */
         default:
-            TWCR = (1 << TWEA) | (1 << TWEN) | (1 << TWINT);
-            return 0u;
+            TWCR = (1 << TWEA) | (1 << TWEN) | (1 << TWIE) | (1 << TWINT);
+            return;
     }
 }
