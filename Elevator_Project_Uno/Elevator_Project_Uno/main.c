@@ -14,10 +14,10 @@
 #define LOW_POWER_DELAY_MS 10000UL //10 seconds of idling before power saving mode
 
 /* UNO output allocation
- * D4  -> movement LED
- * D5  -> door open LED
- * D6  -> door closing LED
- * D7  -> obstacle LED
+ * D3  -> movement LED
+ * D4  -> door open LED
+ * D5  -> door closing LED
+ * D6  -> obstacle LED
  * D9  -> buzzer (OC1A hardware toggle)
  */
 #define MOVING_LED_PORT PORTD
