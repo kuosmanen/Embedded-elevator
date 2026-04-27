@@ -23,6 +23,8 @@
 #define DOOR_CLOSE_TIME_MS 2000UL
 #define FAULT_TIME_MS 1500UL
 #define LOW_POWER_DELAY_MS 10000UL
+#define POST_WAKE_LOCKOUT_MS 500UL
+#define WAKE_RELEASE_TIMEOUT_MS 1200UL
 
 
 typedef enum elevator_state {
@@ -45,6 +47,7 @@ uint8_t g_input_len = 0;
 static uint32_t g_state_time_ms = 0;
 static uint32_t g_move_time_ms = 0;
 static uint32_t g_inactivity_time_ms = 0;
+static uint32_t g_sleep_lockout_ms = 0;
 static uint8_t EEMEM saved_floor_eeprom;
 static volatile bool g_keypad_wake_pending = false;
 
@@ -59,6 +62,7 @@ static bool is_digit(uint8_t key);
 static void keypad_wakeup_interrupt_init(void);
 static bool can_enter_low_power(void);
 static void enter_low_power_until_keypad(void);
+static void mark_activity(void);
 
 ISR(PCINT2_vect)
 {
@@ -78,21 +82,40 @@ static bool can_enter_low_power(void)
     return (g_state == STATE_IDLE) && queue_is_empty(&g_queue) && (g_input_len == 0u);
 }
 
+static void mark_activity(void)
+{
+    g_inactivity_time_ms = 0u;
+}
+
 static void enter_low_power_until_keypad(void)
 {
     uint8_t adcsra_backup;
     uint8_t acsr_backup;
     uint8_t prr0_backup;
     uint8_t prr1_backup;
+    uint16_t release_wait_ms = 0u;
 
-    /* If a key is already held, skip sleep and handle it immediately. */
+    /*
+     * Prepare the keypad specifically for wake-up before checking/sleeping.
+     * The normal scanner leaves different row patterns on PORTK while scanning;
+     * for wake-up we want all rows active and all column inputs pulled high.
+     */
+    KEYPAD_Init();
+    M_ROW = 0x0Fu;
+    _delay_ms(2);
+
+    /* If a key is already held, skip sleep. This prevents sleeping immediately
+     * while a release/bounce is still visible on the keypad columns.
+     */
     if ((M_COL & 0x0Fu) != 0x0Fu) {
+        mark_activity();
         return;
     }
 
     lcd_command(LCD_DISP_OFF);
 
     g_keypad_wake_pending = false;
+    PCIFR |= (1 << PCIF2);
 
     adcsra_backup = ADCSRA;
     acsr_backup = ACSR;
@@ -126,14 +149,25 @@ static void enter_low_power_until_keypad(void)
     ACSR = acsr_backup;
     ADCSRA = adcsra_backup;
 
+    KEYPAD_Init();
+    M_ROW = 0x0Fu;
+
     lcd_command(LCD_DISP_ON);
     lcd_show_idle();
 
-    if (g_keypad_wake_pending) {
-        _delay_ms(15);
+    /*
+     * The key used to wake the system should not also be interpreted as a
+     * floor digit or command. Wait for release, with a timeout so a stuck key
+     * cannot freeze the program forever.
+     */
+    while (((M_COL & 0x0Fu) != 0x0Fu) && (release_wait_ms < WAKE_RELEASE_TIMEOUT_MS)) {
+        _delay_ms(10);
+        release_wait_ms = (uint16_t)(release_wait_ms + 10u);
     }
 
+    _delay_ms(30);
     PCIFR |= (1 << PCIF2);
+    mark_activity();
 }
 
 
@@ -233,7 +267,7 @@ static void set_state(elevator_state_t new_state)
     g_state = new_state;
     g_state_time_ms = 0;
     g_move_time_ms = 0;
-    g_inactivity_time_ms = 0;
+    mark_activity();
 
     switch (g_state) {
         case STATE_IDLE:
@@ -399,21 +433,21 @@ int main(void)
         bool key_activity;
 
         /*
-         * Only enter low power after a real inactivity timeout.
-         * The earlier version slept immediately whenever the system was idle,
-         * the request queue was empty and no digits were currently typed.
+         * Enter low power only after the elevator has been continuously idle
+         * for the configured delay. The lockout is used after wake-up so that
+         * keypad release/bounce cannot cause an immediate re-sleep.
          */
-        if (can_enter_low_power() && (g_inactivity_time_ms >= LOW_POWER_DELAY_MS)) {
+        if ((g_sleep_lockout_ms == 0u) &&
+            can_enter_low_power() &&
+            (g_inactivity_time_ms >= LOW_POWER_DELAY_MS)) {
             enter_low_power_until_keypad();
 
-            /* Waking up is activity even if the key is released too quickly
-             * to be decoded. Without this reset the system can immediately
-             * enter sleep again after the wake key is released.
+            /*
+             * The wake key only wakes the device. It is intentionally not
+             * processed here as a normal floor input.
              */
-            g_inactivity_time_ms = 0u;
-
-            process_keypad();
-            update_state_machine(0u);
+            mark_activity();
+            g_sleep_lockout_ms = POST_WAKE_LOCKOUT_MS;
             continue;
         }
 
@@ -421,7 +455,14 @@ int main(void)
         update_state_machine(50u);
 
         if (key_activity || !can_enter_low_power()) {
-            g_inactivity_time_ms = 0u;
+            mark_activity();
+        } else if (g_sleep_lockout_ms > 0u) {
+            if (g_sleep_lockout_ms > 50u) {
+                g_sleep_lockout_ms -= 50u;
+            } else {
+                g_sleep_lockout_ms = 0u;
+            }
+            mark_activity();
         } else if (g_inactivity_time_ms < LOW_POWER_DELAY_MS) {
             g_inactivity_time_ms += 50u;
         }
