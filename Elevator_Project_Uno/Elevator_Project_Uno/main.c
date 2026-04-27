@@ -133,21 +133,18 @@ static void apply_command(uint8_t command)
             g_obstacle_blink_active = false;
             leds_all_off();
             MOVING_LED_PORT |= (1 << MOVING_LED_PIN);
-            buzzer_start_background();
             break;
 
         case UNO_CMD_DOOR_OPEN:
             g_obstacle_blink_active = false;
             leds_all_off();
             OPEN_LED_PORT |= (1 << OPEN_LED_PIN);
-            buzzer_start_background();
             break;
 
         case UNO_CMD_DOOR_CLOSING:
             g_obstacle_blink_active = false;
             leds_all_off();
             CLOSE_LED_PORT |= (1 << CLOSE_LED_PIN);
-            buzzer_start_background();
             break;
 
         case UNO_CMD_OBSTACLE_START:
