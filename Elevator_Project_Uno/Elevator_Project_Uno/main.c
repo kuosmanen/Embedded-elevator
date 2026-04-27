@@ -108,6 +108,10 @@ static void obstacle_blink_update(void)
 /// Applying commands received from the MEGA master controller by setting LEDs and buzzer state
 static void apply_command(uint8_t command)
 {
+    //making sure timing is live and the CPU is out of low-power before processing commands
+     
+    exit_low_power_mode();
+
     switch (command) {
         case UNO_CMD_IDLE:
             g_obstacle_blink_active = false;
@@ -118,7 +122,6 @@ static void apply_command(uint8_t command)
             break;
 
         case UNO_CMD_MOVING:
-            exit_low_power_mode();
             g_obstacle_blink_active = false;
             leds_all_off();
             MOVING_LED_PORT |= (1 << MOVING_LED_PIN);
@@ -126,7 +129,6 @@ static void apply_command(uint8_t command)
             break;
 
         case UNO_CMD_DOOR_OPEN:
-            exit_low_power_mode();
             g_obstacle_blink_active = false;
             leds_all_off();
             OPEN_LED_PORT |= (1 << OPEN_LED_PIN);
@@ -134,7 +136,6 @@ static void apply_command(uint8_t command)
             break;
 
         case UNO_CMD_DOOR_CLOSING:
-            exit_low_power_mode();
             g_obstacle_blink_active = false;
             leds_all_off();
             CLOSE_LED_PORT |= (1 << CLOSE_LED_PIN);
@@ -142,14 +143,12 @@ static void apply_command(uint8_t command)
             break;
 
         case UNO_CMD_OBSTACLE_START:
-            exit_low_power_mode();
             leds_all_off();
             obstacle_blink_start();
             buzzer_start_alert();
             break;
 
         case UNO_CMD_OBSTACLE_STOP:
-            exit_low_power_mode();
             g_obstacle_blink_active = false;
             OBST_LED_PORT &= (uint8_t)~(1 << OBST_LED_PIN);
             buzzer_start_background();
@@ -157,7 +156,6 @@ static void apply_command(uint8_t command)
 
         case UNO_CMD_FAULT:
         default:
-            exit_low_power_mode();
             g_obstacle_blink_active = false;
             leds_all_off();
             buzzer_stop();//silent if fault
