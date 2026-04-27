@@ -95,11 +95,13 @@ static void obstacle_blink_update(void)
 
     now = millis_get();
     if ((now - g_last_blink_ms) >= 250u) {
+        // blinking if last blink was more than 250 ms ago
         OBST_LED_PORT ^= (1 << OBST_LED_PIN);
         g_last_blink_ms = now;
         g_obstacle_toggle_count++;
 
         if (g_obstacle_toggle_count >= 6u) {
+            // toggling 6 times = 3 blinks (on, off... on, off... on, off)
             g_obstacle_blink_active = false;
             OBST_LED_PORT &= (uint8_t)~(1 << OBST_LED_PIN);
         }
@@ -109,20 +111,17 @@ static void obstacle_blink_update(void)
 /// Applying commands received from the MEGA master controller by setting LEDs and buzzer state
 static void apply_command(uint8_t command)
 {
-    /* Make sure timing is live and the CPU is out of low-power before processing commands. */
+    // exiting low power before command processing
     exit_low_power_mode();
 
     switch (command) {
         case UNO_CMD_IDLE:
             g_obstacle_blink_active = false;
+            //no leds on in idle nor in low power mode
             leds_all_off();
-
-            /*
-             * The elevator is awake but idle. The background melody should
-             * continue during the idle delay, but the UNO may enter low-power
-             * if no new command arrives for LOW_POWER_DELAY_MS.
-             */
-            buzzer_start_background();
+            // background music should play in idle
+            // idle means empty queue and no typed keypad digits, so the countdown to low power mode starts from here
+            buzzer_start_background();//when in low power mode, buzzer is stopped in main loop
             g_low_power_requested_ms = millis_get();
             g_low_power_pending = true;
             break;
@@ -130,12 +129,7 @@ static void apply_command(uint8_t command)
         case UNO_CMD_BACKGROUND:
             g_obstacle_blink_active = false;
             leds_all_off();
-
-            /*
-             * System is awake/being used, for example while the user is typing
-             * a floor number. Keep the background melody running, but do not
-             * start the UNO sleep countdown from this command.
-             */
+            //system is awake but no status LEDs are on
             buzzer_start_background();
             g_low_power_pending = false;
             break;
@@ -167,8 +161,7 @@ static void apply_command(uint8_t command)
         case UNO_CMD_OBSTACLE_START:
             leds_all_off();
             obstacle_blink_start();
-
-            /* Obstacle alert temporarily replaces the background melody. */
+            //obstacle alert replaces the background melody
             buzzer_start_alert();
             g_low_power_pending = false;
             break;
@@ -176,8 +169,7 @@ static void apply_command(uint8_t command)
         case UNO_CMD_OBSTACLE_STOP:
             g_obstacle_blink_active = false;
             OBST_LED_PORT &= (uint8_t)~(1 << OBST_LED_PIN);
-
-            /* After the obstacle is cleared, resume the background melody. */
+            // after the obstacle is cleared, playing backgroudn tune
             buzzer_start_background();
             g_low_power_pending = false;
             break;
@@ -185,8 +177,6 @@ static void apply_command(uint8_t command)
         case UNO_CMD_FAULT:
             g_obstacle_blink_active = false;
             leds_all_off();
-
-            /* Background melody is intended to be non-stop while awake. */
             buzzer_start_background();
             g_low_power_pending = false;
             break;
@@ -211,11 +201,7 @@ int main(void)
     set_sleep_mode(SLEEP_MODE_IDLE);
     sei();
 
-    /*
-     * Start background music immediately when the UNO program starts.
-     * If the MEGA first sends UNO_CMD_IDLE, this same countdown is simply
-     * restarted from that command.
-     */
+    //starting background tune on bootup
     buzzer_start_background();
     g_low_power_requested_ms = millis_get();
     g_low_power_pending = true;
@@ -225,11 +211,11 @@ int main(void)
             apply_command(command);
         }
 
-        if (g_low_power_pending &&
-            ((millis_get() - g_low_power_requested_ms) >= LOW_POWER_DELAY_MS)) {
+        //checking countdown to low power mode if in idle
+        if (g_low_power_pending && ((millis_get() - g_low_power_requested_ms) >= LOW_POWER_DELAY_MS)) {
             g_low_power_pending = false;
 
-            /* Music must not play while the UNO is in low-power mode. */
+            //no sound in low power mode
             buzzer_stop();
 
             timer0_tick_stop();
