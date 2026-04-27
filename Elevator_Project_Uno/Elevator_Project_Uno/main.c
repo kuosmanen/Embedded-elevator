@@ -160,7 +160,7 @@ static void apply_command(uint8_t command)
             g_low_power_pending = true;
             break;
 
-        default:
+        default: //UNO_CMD_FAULT = 6
             g_obstacle_blink_active = false;
             leds_all_off();
             buzzer_stop();//silent if fault
