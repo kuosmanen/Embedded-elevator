@@ -120,6 +120,8 @@ static void handle_background_queue_key(uint8_t key)
             queue_push(&g_queue, floor);
         }
         buffered_len = 0;
+    } else if (key == 'A') {
+        queue_reset(&g_queue);
     } else if (g_state == STATE_OBSTACLE_DETECTION) {
         set_state(STATE_DOOR_CLOSING);
     }
@@ -289,7 +291,7 @@ int main(void)
     lcd_clrscr();
     twi_master_init();
 
-    queue_init(&g_queue);
+    queue_reset(&g_queue);
 
     restored_floor = eeprom_read_byte(&saved_floor_eeprom);
     if (restored_floor <= 99u) {

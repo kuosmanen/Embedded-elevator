@@ -15,7 +15,11 @@ typedef struct floor_queue {
 	uint8_t count;
 } floor_queue_t;
 
-void queue_init(floor_queue_t *queue);
+/**
+ * Resets the queue. Is used both during bootup for initialization
+ * and when the user wants to clear the queue.
+ */
+void queue_reset(floor_queue_t *queue);
 
 bool queue_push(floor_queue_t *queue, uint8_t floor);
 bool queue_pop(floor_queue_t *queue, uint8_t *floor);
