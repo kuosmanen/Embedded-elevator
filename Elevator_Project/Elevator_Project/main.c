@@ -47,7 +47,6 @@ uint8_t g_input_len = 0;
 static uint32_t g_state_time_ms = 0;
 static uint32_t g_move_time_ms = 0;
 static uint32_t g_inactivity_time_ms = 0;
-static uint32_t g_sleep_lockout_ms = 0;
 static uint8_t EEMEM saved_floor_eeprom;
 static volatile bool g_keypad_wake_pending = false;
 
@@ -267,7 +266,7 @@ static void set_state(elevator_state_t new_state)
     g_state = new_state;
     g_state_time_ms = 0;
     g_move_time_ms = 0;
-    mark_activity();
+    g_inactivity_time_ms = 0;
 
     switch (g_state) {
         case STATE_IDLE:
@@ -433,21 +432,21 @@ int main(void)
         bool key_activity;
 
         /*
-         * Enter low power only after the elevator has been continuously idle
-         * for the configured delay. The lockout is used after wake-up so that
-         * keypad release/bounce cannot cause an immediate re-sleep.
+         * Only enter low power after a real inactivity timeout.
+         * The earlier version slept immediately whenever the system was idle,
+         * the request queue was empty and no digits were currently typed.
          */
-        if ((g_sleep_lockout_ms == 0u) &&
-            can_enter_low_power() &&
-            (g_inactivity_time_ms >= LOW_POWER_DELAY_MS)) {
+        if (can_enter_low_power() && (g_inactivity_time_ms >= LOW_POWER_DELAY_MS)) {
             enter_low_power_until_keypad();
 
-            /*
-             * The wake key only wakes the device. It is intentionally not
-             * processed here as a normal floor input.
+            /* Waking up is activity even if the key is released too quickly
+             * to be decoded. Without this reset the system can immediately
+             * enter sleep again after the wake key is released.
              */
-            mark_activity();
-            g_sleep_lockout_ms = POST_WAKE_LOCKOUT_MS;
+            g_inactivity_time_ms = 0u;
+
+            process_keypad();
+            update_state_machine(0u);
             continue;
         }
 
@@ -455,14 +454,7 @@ int main(void)
         update_state_machine(50u);
 
         if (key_activity || !can_enter_low_power()) {
-            mark_activity();
-        } else if (g_sleep_lockout_ms > 0u) {
-            if (g_sleep_lockout_ms > 50u) {
-                g_sleep_lockout_ms -= 50u;
-            } else {
-                g_sleep_lockout_ms = 0u;
-            }
-            mark_activity();
+            g_inactivity_time_ms = 0u;
         } else if (g_inactivity_time_ms < LOW_POWER_DELAY_MS) {
             g_inactivity_time_ms += 50u;
         }
