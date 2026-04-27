@@ -44,7 +44,6 @@ uint8_t g_input_len = 0;
 
 static uint32_t g_state_time_ms = 0;
 static uint32_t g_move_time_ms = 0;
-static uint32_t g_inactivity_time_ms = 0;
 static uint8_t EEMEM saved_floor_eeprom;
 static volatile bool g_keypad_wake_pending = false;
 
@@ -233,7 +232,6 @@ static void set_state(elevator_state_t new_state)
     g_state = new_state;
     g_state_time_ms = 0;
     g_move_time_ms = 0;
-    g_inactivity_time_ms = 0;
 
     switch (g_state) {
         case STATE_IDLE:
@@ -398,32 +396,23 @@ int main(void)
     while (1) {
         bool key_activity;
 
-        /*
-         * Only enter low power after a real inactivity timeout.
-         * The earlier version slept immediately whenever the system was idle,
-         * the request queue was empty and no digits were currently typed.
-         */
-        if (can_enter_low_power() && (g_inactivity_time_ms >= LOW_POWER_DELAY_MS)) {
+        key_activity = process_keypad();
+        update_state_machine(50u);
+
+        if ((g_state == STATE_IDLE) && key_activity) {
+            /* Key activity counts as user interaction, reset idle dwell timer. */
+            g_state_time_ms = 0u;
+        }
+
+        if (can_enter_low_power() && (g_state_time_ms >= LOW_POWER_DELAY_MS)) {
             enter_low_power_until_keypad();
 
-            /* Waking up is activity even if the key is released too quickly
-             * to be decoded. Without this reset the system can immediately
-             * enter sleep again after the wake key is released.
-             */
-            g_inactivity_time_ms = 0u;
+            /* Wake event is activity even if no full key decode happened. */
+            g_state_time_ms = 0u;
 
             process_keypad();
             update_state_machine(0u);
             continue;
-        }
-
-        key_activity = process_keypad();
-        update_state_machine(50u);
-
-        if (key_activity || !can_enter_low_power()) {
-            g_inactivity_time_ms = 0u;
-        } else if (g_inactivity_time_ms < LOW_POWER_DELAY_MS) {
-            g_inactivity_time_ms += 50u;
         }
 
         _delay_ms(50);
