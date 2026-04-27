@@ -14,10 +14,10 @@
 #define LOW_POWER_DELAY_MS 10000UL //10 seconds of idling before power saving mode
 
 /* UNO output allocation
- * D4  -> movement LED
- * D5  -> door open LED
- * D6  -> door closing LED
- * D7  -> obstacle LED
+ * D3  -> movement LED
+ * D4  -> door open LED
+ * D5  -> door closing LED
+ * D6  -> obstacle LED
  * D9  -> buzzer (OC1A hardware toggle)
  */
 #define MOVING_LED_PORT PORTD
@@ -117,7 +117,14 @@ static void apply_command(uint8_t command)
         case UNO_CMD_IDLE:
             g_obstacle_blink_active = false;
             leds_all_off();
-            buzzer_stop();
+
+            /*
+            * Do not stop the background jingle here.
+            * The elevator is idle, but it has not entered low-power mode yet.
+            * Let the music continue until the actual sleep timeout happens.
+            */
+            buzzer_start_background();
+
             g_low_power_requested_ms = millis_get();
             g_low_power_pending = true;
             break;
@@ -180,8 +187,16 @@ int main(void)
 			apply_command(command);
 		}
 
-        if (g_low_power_pending && ((millis_get() - g_low_power_requested_ms) >= LOW_POWER_DELAY_MS)) {
+        if (g_low_power_pending &&
+            ((millis_get() - g_low_power_requested_ms) >= LOW_POWER_DELAY_MS)) {
             g_low_power_pending = false;
+
+            /*
+            * Now the Uno is actually entering low-power mode,
+            * so this is the correct time to stop the music.
+            */
+            buzzer_stop();
+
             timer0_tick_stop();
             g_low_power_mode = true;
         }
