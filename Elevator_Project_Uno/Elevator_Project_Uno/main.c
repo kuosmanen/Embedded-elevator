@@ -207,6 +207,7 @@ int main(void)
     g_low_power_pending = true;
 
     while (1) {
+        // UNO (slave) communicates with MEGA (master)
         if (twi_slave_receive_byte(&command)) {
             apply_command(command);
         }
