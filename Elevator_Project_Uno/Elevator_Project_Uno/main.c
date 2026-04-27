@@ -115,11 +115,8 @@ static void apply_command(uint8_t command)
 
     switch (command) {
         case UNO_CMD_IDLE:
-            g_obstacle_blink_active = false;
-            leds_all_off();
-            buzzer_stop();
-            g_low_power_requested_ms = millis_get();
-            g_low_power_pending = true;
+            //basically does nothing
+            g_low_power_pending = false;
             break;
 
         case UNO_CMD_MOVING:
@@ -155,7 +152,14 @@ static void apply_command(uint8_t command)
             buzzer_start_background();
             break;
 
-        case UNO_CMD_FAULT:
+        case UNO_CMD_SLEEP:
+            g_obstacle_blink_active = false;
+            leds_all_off();
+            buzzer_stop();
+            g_low_power_requested_ms = millis_get();
+            g_low_power_pending = true;
+            break;
+
         default:
             g_obstacle_blink_active = false;
             leds_all_off();

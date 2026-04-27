@@ -405,10 +405,13 @@ int main(void)
         }
 
         if (can_enter_low_power() && (g_state_time_ms >= LOW_POWER_DELAY_MS)) {
+            twi_master_send_byte(ELEVATOR_TWI_SLAVE_ADDRESS, UNO_CMD_SLEEP);
             enter_low_power_until_keypad();
 
             /* Wake event is activity even if no full key decode happened. */
             g_state_time_ms = 0u;
+
+            twi_master_send_byte(ELEVATOR_TWI_SLAVE_ADDRESS, UNO_CMD_IDLE);
 
             process_keypad();
             update_state_machine(0u);
