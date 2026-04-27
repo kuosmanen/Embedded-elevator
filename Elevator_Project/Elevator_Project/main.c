@@ -22,6 +22,7 @@
 #define DOOR_OPEN_TIME_MS 3000UL
 #define DOOR_CLOSE_TIME_MS 2000UL
 #define FAULT_TIME_MS 1500UL
+#define LOW_POWER_DELAY_MS 10000UL
 
 
 typedef enum elevator_state {
@@ -43,6 +44,7 @@ uint8_t g_input_len = 0;
 
 static uint32_t g_state_time_ms = 0;
 static uint32_t g_move_time_ms = 0;
+static uint32_t g_inactivity_time_ms = 0;
 static uint8_t EEMEM saved_floor_eeprom;
 static volatile bool g_keypad_wake_pending = false;
 
@@ -50,7 +52,7 @@ static void handle_idle_key(uint8_t key);
 static void handle_background_queue_key(uint8_t key);
 static void try_start_next_request(void);
 static void set_state(elevator_state_t new_state);
-static void process_keypad(void);
+static bool process_keypad(void);
 static void update_state_machine(uint32_t elapsed_ms);
 static uint8_t digits_to_floor(void);
 static bool is_digit(uint8_t key);
@@ -271,12 +273,15 @@ static void set_state(elevator_state_t new_state)
 /**
  * A function that main.c uses to utilize the keypad functionality,
  * including key input detection.
+ *
+ * Returns true when a key was decoded. The main loop uses this as
+ * activity so that low power mode is not re-entered immediately.
  */
-static void process_keypad(void)
+static bool process_keypad(void)
 {
     uint8_t key = KEYPAD_GetKey();
     if (key == 0u) {
-        return;
+        return false;
     }
 
     if (g_state == STATE_IDLE) {
@@ -284,16 +289,17 @@ static void process_keypad(void)
         if (g_state == STATE_IDLE) {
             lcd_show_idle();
         }
-        return;
+        return true;
     }
 
     if (g_state == STATE_OBSTACLE_DETECTION) {
         twi_master_send_byte(ELEVATOR_TWI_SLAVE_ADDRESS, UNO_CMD_OBSTACLE_STOP);
         set_state(STATE_DOOR_CLOSING);
-        return;
+        return true;
     }
 
     handle_background_queue_key(key);
+    return true;
 }
 
 static void update_state_machine(uint32_t elapsed_ms)
@@ -389,15 +395,36 @@ int main(void)
     sei();
 
     while (1) {
-        if (can_enter_low_power()) {
+        bool key_activity;
+
+        /*
+         * Only enter low power after a real inactivity timeout.
+         * The earlier version slept immediately whenever the system was idle,
+         * the request queue was empty and no digits were currently typed.
+         */
+        if (can_enter_low_power() && (g_inactivity_time_ms >= LOW_POWER_DELAY_MS)) {
             enter_low_power_until_keypad();
+
+            /* Waking up is activity even if the key is released too quickly
+             * to be decoded. Without this reset the system can immediately
+             * enter sleep again after the wake key is released.
+             */
+            g_inactivity_time_ms = 0u;
+
             process_keypad();
             update_state_machine(0u);
             continue;
         }
 
-        process_keypad();
+        key_activity = process_keypad();
         update_state_machine(50u);
+
+        if (key_activity || !can_enter_low_power()) {
+            g_inactivity_time_ms = 0u;
+        } else if (g_inactivity_time_ms < LOW_POWER_DELAY_MS) {
+            g_inactivity_time_ms += 50u;
+        }
+
         _delay_ms(50);
     }
 }
