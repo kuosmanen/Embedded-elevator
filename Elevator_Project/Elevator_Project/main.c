@@ -243,6 +243,10 @@ static void submit_floor_request(uint8_t floor)
     }
 }
 
+/**
+ * Handles key presses when the elevator is in idle state.
+ * Digits are stored until user presses "#" to submit the request or "*" to clear the input.
+ */
 static void handle_idle_key(uint8_t key)
 {
     if (is_digit(key)) {
@@ -259,6 +263,18 @@ static void handle_idle_key(uint8_t key)
     }
 }
 
+/*
+ * Handles key presses when the elevator is already busy.
+ * 
+ * This allows for floor requests to be queued while the elevator is moving or is handling doors.
+ * This function uses a separate small input buffer so as to not intervene with the idle input buffer.
+ * 
+ * Some special behaviours:
+ * - "*" during DOOR_OPENING triggers obstacle detetcion
+ * - "#" confirms a queued floor request
+ * - "A" clears the queue
+ * - any key during OBSTACLE_DETECTION ends the obstacle state and starts closing the door again.
+ */
 static void handle_background_queue_key(uint8_t key)
 {
     static uint8_t buffered_digits[2];
@@ -291,6 +307,14 @@ static void handle_background_queue_key(uint8_t key)
     }
 }
 
+/*
+ * Start the next queued floor request if elevator is idle
+ *
+ * If queue is empty, do nothing.
+ * If the next target is above the current floor, start going up.
+ * If next target is below the current floor, start going down.
+ * If the target is the current floor, enter FAULT state as per assignment.
+ */
 static void try_start_next_request(void)
 {
     if (g_state != STATE_IDLE) {
@@ -310,6 +334,16 @@ static void try_start_next_request(void)
     }
 }
 
+/*
+ * Handles changing of the elevator state.
+ *
+ * This function centralizes all state changes and actions that happen when a new state begins:
+ * - update the current state variable
+ * - reset state timing counters
+ * - reset the inactivity timer
+ * - send the matching (to state) command to the UNO
+ * - update the LCD message
+ */
 static void set_state(elevator_state_t new_state)
 {
     g_state = new_state;
@@ -319,32 +353,57 @@ static void set_state(elevator_state_t new_state)
 
     switch (g_state) {
         case STATE_IDLE:
+            /*
+             * Elevator waiting for input.
+             * Tell UNO to enter idle output mode and show idle text on LCD
+             */
             twi_master_send_byte(ELEVATOR_TWI_SLAVE_ADDRESS, UNO_CMD_IDLE);
             lcd_show_idle();
             break;
         case STATE_GOING_UP:
+            /*
+             * Elevator moving upwards
+             * UNO turns on movement LED and keeps background memory playing
+             */
             twi_master_send_byte(ELEVATOR_TWI_SLAVE_ADDRESS, UNO_CMD_MOVING);
             lcd_show_current_floor("Going up");
             break;
         case STATE_GOING_DOWN:
+            /*
+             * Elevator moving downwards
+             * UNO turns on movement LED and keeps background memory playing
+             */
             twi_master_send_byte(ELEVATOR_TWI_SLAVE_ADDRESS, UNO_CMD_MOVING);
             lcd_show_current_floor("Going down");
             break;
         case STATE_DOOR_OPENING:
+            /*
+             * Door is opening, "*" can trigger obstacle detection
+             */
             twi_master_send_byte(ELEVATOR_TWI_SLAVE_ADDRESS, UNO_CMD_DOOR_OPEN);
             lcd_print_line(0, "Door open       ");
             lcd_print_line(1, "*: obstacle     ");
             break;
         case STATE_OBSTACLE_DETECTION:
+            /*
+             * Obstacle detected, waiting for user to clear it by pressing any key.
+             * The UNO blinks the obstacle LED and plays alert sounds.
+             */
             twi_master_send_byte(ELEVATOR_TWI_SLAVE_ADDRESS, UNO_CMD_OBSTACLE_START);
             lcd_show_obstacle();
             break;
         case STATE_DOOR_CLOSING:
+            /*
+             * Door is closing, returns to idle afterwards.
+             */
             twi_master_send_byte(ELEVATOR_TWI_SLAVE_ADDRESS, UNO_CMD_DOOR_CLOSING);
             lcd_print_line(0, "Door closing    ");
             lcd_print_line(1, "Please wait     ");
             break;
         case STATE_FAULT:
+            /* 
+             * Fault state, used when the selected floor equals current floor.
+             */
             twi_master_send_byte(ELEVATOR_TWI_SLAVE_ADDRESS, UNO_CMD_FAULT);
             lcd_show_fault();
             break;
@@ -353,12 +412,16 @@ static void set_state(elevator_state_t new_state)
     }
 }
 
-/**
- * A function that main.c uses to utilize the keypad functionality,
- * including key input detection.
+/*
+ * Read and process one keypad input if available.
  *
- * Returns true when a key was decoded. The main loop uses this as
- * activity so that low power mode is not re-entered immediately.
+ * Returns true if a key was received. The main loop uses this return value
+ * as user activity, which resets the inactivity timer.
+ *
+ * Input handling depends on the current elevator state:
+ * - IDLE: digits, clear, and submit floor requests
+ * - OBSTACLE_DETECTION: any key stops obstacle alert and starts door closing
+ * - other active states: keypad input is used for background queueing
  */
 static bool process_keypad(void)
 {
@@ -385,16 +448,33 @@ static bool process_keypad(void)
     return true;
 }
 
+/*
+ * Advance the elevator state machine.
+ *
+ * This function is called repeatedly from the main loop with elapsed_ms = 50.
+ * It updates timers and decides when to transition from one state to another.
+ *
+ * The actual state transition actions are handled by set_state().
+ */
 static void update_state_machine(uint32_t elapsed_ms)
 {
     g_state_time_ms += elapsed_ms;
 
     switch (g_state) {
         case STATE_IDLE:
+            /*
+             * While idle, check whether a queued request exists.
+             * If there is one, start moving toward it.
+             */
             try_start_next_request();
             break;
 
         case STATE_GOING_UP:
+            /*
+             * Simulate elevator movement.
+             * Every MOVE_STEP_MS milliseconds, increase current floor by one.
+             * The floor is saved to EEPROM so it can be restored after reset.
+             */
             g_move_time_ms += elapsed_ms;
             if (g_move_time_ms >= MOVE_STEP_MS) {
                 g_move_time_ms = 0;
@@ -410,6 +490,9 @@ static void update_state_machine(uint32_t elapsed_ms)
             break;
 
         case STATE_GOING_DOWN:
+            /*
+             * Same as GOING_UP, but the current floor decreases by one step.
+             */
             g_move_time_ms += elapsed_ms;
             if (g_move_time_ms >= MOVE_STEP_MS) {
                 g_move_time_ms = 0;
@@ -425,22 +508,33 @@ static void update_state_machine(uint32_t elapsed_ms)
             break;
 
         case STATE_DOOR_OPENING:
+            /*
+             * Door stays open for a fixed time unless obstacle is triggered.
+             */
             if (g_state_time_ms >= DOOR_OPEN_TIME_MS) {
                 set_state(STATE_DOOR_CLOSING);
             }
             break;
 
         case STATE_OBSTACLE_DETECTION:
-            /* waits here until any keypad key is pressed */
+            /*
+             * Stay here until process_keypad() detects a key press.
+             */
             break;
 
         case STATE_DOOR_CLOSING:
+            /*
+             * Door closing lasts for a fixed time, then elevator returns to idle.
+             */
             if (g_state_time_ms >= DOOR_CLOSE_TIME_MS) {
                 set_state(STATE_IDLE);
             }
             break;
 
         case STATE_FAULT:
+            /*
+             * Fault message is shown briefly, then system returns to idle.
+             */
             if (g_state_time_ms >= FAULT_TIME_MS) {
                 set_state(STATE_IDLE);
             }
@@ -455,14 +549,24 @@ int main(void)
 {
     uint8_t restored_floor;
 
+    /*
+     * Initialize hardware modules controlled by the Mega.
+     */
     KEYPAD_Init();
     keypad_wakeup_interrupt_init();
     lcd_init(LCD_DISP_ON);
     lcd_clrscr();
     twi_master_init();
 
+    /*
+     * Clear the floor request queue at startup.
+     */
     queue_reset(&g_queue);
 
+    /*
+     * Restore the last known floor from EEPROM.
+     * If EEPROM contains an invalid value, reset to floor 0.
+     */
     restored_floor = eeprom_read_byte(&saved_floor_eeprom);
     if (restored_floor <= 99u) {
         g_current_floor = restored_floor;
@@ -470,11 +574,18 @@ int main(void)
         g_current_floor = 0u;
         eeprom_update_byte(&saved_floor_eeprom, 0u);
     }
-
+    /*
+     * Show startup message briefly, then enter idle state.
+     */
     lcd_print_line(0, "Elevator ready  ");
     lcd_print_line(1, "Floor restored  ");
     _delay_ms(1200);
     set_state(STATE_IDLE);
+
+    /*
+     * Enable global interrupts.
+     * Needed for keypad wake-up interrupt.
+     */
     sei();
 
     while (1) {
@@ -508,16 +619,20 @@ int main(void)
             continue;
         }
 
+        /*
+         * Read keypad once and advance the state machine by one loop step.
+         */
         key_activity = process_keypad();
         update_state_machine(50u);
 
         /*
-         * If the user pressed keys while the elevator is still idle, keep the
-         * UNO background melody synchronized with the MEGA activity state.
+         * If a key was pressed while the elevator is still idle, notify the Uno.
          *
-         * When no digits are buffered, UNO_CMD_IDLE starts/keeps the melody and
-         * starts the UNO idle low-power countdown. When digits are buffered,
-         * UNO_CMD_BACKGROUND keeps the melody running without starting sleep.
+         * If no digits are buffered, UNO_CMD_IDLE lets the Uno start its own
+         * sleep countdown.
+         *
+         * If digits are buffered, UNO_CMD_BACKGROUND keeps the background music
+         * running without starting the Uno sleep countdown.
          */
         if (key_activity && (g_state == STATE_IDLE)) {
             if (can_enter_low_power()) {
@@ -526,19 +641,31 @@ int main(void)
                 twi_master_send_byte(ELEVATOR_TWI_SLAVE_ADDRESS, UNO_CMD_BACKGROUND);
             }
         }
-
+        /*
+         * Count down the post-wake lockout timer.
+         */
         if (g_sleep_lockout_ms >= 50u) {
             g_sleep_lockout_ms -= 50u;
         } else {
             g_sleep_lockout_ms = 0u;
         }
-
+        /*
+         * Update inactivity timer.
+         *
+         * Any key activity or active elevator state resets the inactivity timer.
+         * Only fully idle time is allowed to increase the timer.
+         */
         if (key_activity || !can_enter_low_power()) {
             mark_activity();
         } else if (g_inactivity_time_ms < LOW_POWER_DELAY_MS) {
             g_inactivity_time_ms += 50u;
         }
 
+        /*
+         * Main loop period.
+         * Since this delay is 50 ms, update_state_machine(50u) uses the same
+         * elapsed time value.
+         */
         _delay_ms(50);
     }
 }
