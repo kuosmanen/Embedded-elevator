@@ -26,16 +26,25 @@
 #define POST_WAKE_LOCKOUT_MS 500UL
 #define WAKE_RELEASE_TIMEOUT_MS 1200UL
 
+/*
+ * Elevator state machine states.
+
+    * The Mega uses these states to decide what happens next
+    * Whenever the state changes, the Mega also sends a command to the Uno so it can
+    * match the background music / sound and LEDs to the current elevator state
+ */
+
 typedef enum elevator_state {
-    STATE_IDLE = 0,
-    STATE_GOING_UP,
-    STATE_GOING_DOWN,
-    STATE_DOOR_OPENING,
-    STATE_OBSTACLE_DETECTION,
-    STATE_DOOR_CLOSING,
-    STATE_FAULT
+    STATE_IDLE = 0,             // Default state. Waiting for requests.
+    STATE_GOING_UP,             // Moving towards target floor.
+    STATE_GOING_DOWN,           // Moving towards target floor.
+    STATE_DOOR_OPENING,         // Door is opening, can trigger obstacle.
+    STATE_OBSTACLE_DETECTION,   // Obstacle detected. Can be overridden with input.
+    STATE_DOOR_CLOSING,         // Door is closing.
+    STATE_FAULT                 // Fault condition.
 } elevator_state_t;
 
+// Queue variable for storing floor requests. Implementation in queue_utils.c
 floor_queue_t g_queue;
 elevator_state_t g_state = STATE_IDLE;
 uint8_t g_current_floor = 0;
@@ -47,9 +56,17 @@ static uint32_t g_state_time_ms = 0;
 static uint32_t g_move_time_ms = 0;
 static uint32_t g_inactivity_time_ms = 0;
 static uint32_t g_sleep_lockout_ms = 0;
+// EEPROM variable to store current floor even if powered off.
 static uint8_t EEMEM saved_floor_eeprom;
+/* 
+ * Flag set by the keypad wake-up interrupt.
+ * The interrupt is mainly used to wake the CPU from sleep.
+ */
 static volatile bool g_keypad_wake_pending = false;
 
+/*
+ * Function prototypes for local helper functions in this file.
+ */
 static void handle_idle_key(uint8_t key);
 static void handle_background_queue_key(uint8_t key);
 static void try_start_next_request(void);
@@ -63,11 +80,19 @@ static bool can_enter_low_power(void);
 static void enter_low_power_until_keypad(void);
 static void mark_activity(void);
 
+/* 
+ * Pin change interrupt for waking up from sleep when a keypad key is pressed.
+ * The interrupt handler just sets a flag, and the main loop checks this flag
+ * after waking up to know that the wake-up was caused by the keypad.
+ */
 ISR(PCINT2_vect)
 {
     g_keypad_wake_pending = true;
 }
 
+/*
+ * Initialize the keypad wake-up interrupt.
+ */
 static void keypad_wakeup_interrupt_init(void)
 {
     /* PK0..PK3 are keypad column inputs and are PCINT16..PCINT19 on ATmega2560 */
@@ -76,16 +101,36 @@ static void keypad_wakeup_interrupt_init(void)
     PCICR |= (1 << PCIE2);
 }
 
+/* 
+ * Check that we can enter Low power mode, which requires:
+ * - elevator is idle
+ * - queue is empty
+ * - no floor digits are currently typed
+ */
 static bool can_enter_low_power(void)
 {
     return (g_state == STATE_IDLE) && queue_is_empty(&g_queue) && (g_input_len == 0u);
 }
-
+// Simply resets the inactivity timer when something happens.
 static void mark_activity(void)
 {
     g_inactivity_time_ms = 0u;
 }
 
+/*
+ * Enter low power mode until a keypad key is pressed.
+ *
+ * Before sleeping:
+ * - prepare the keypad for wake-up
+ * - LCD display is turned off
+ * - unused peripherals are disabled
+ * 
+ * After waking up:
+ * - restore peripherals
+ * - re-init the keypad
+ * - re-init the LCD
+ * - wake key is ignored as normal input
+ */
 static void enter_low_power_until_keypad(void)
 {
     uint8_t adcsra_backup;
@@ -94,18 +139,14 @@ static void enter_low_power_until_keypad(void)
     uint8_t prr1_backup;
     uint16_t release_wait_ms = 0u;
 
-    /*
-     * Prepare the keypad specifically for wake-up before checking/sleeping.
-     * The normal scanner leaves different row patterns on PORTK while scanning;
-     * for wake-up we want all rows active and all column inputs pulled high.
-     */
+    // Prepare the keypad specifically for wake-up before checking/sleeping.
     KEYPAD_Init();
     M_ROW = 0x0Fu;
     _delay_ms(2);
 
     /*
-     * If a key is already held, skip sleep. This prevents sleeping immediately
-     * while a release/bounce is still visible on the keypad columns.
+     * If a key is already held, dont sleep.
+     * Otherwise the system could sleep immediately during a key release or bounce.
      */
     if ((M_COL & 0x0Fu) != 0x0Fu) {
         mark_activity();
@@ -117,12 +158,13 @@ static void enter_low_power_until_keypad(void)
     g_keypad_wake_pending = false;
     PCIFR |= (1 << PCIF2);
 
+    // Save peripheral register states so we can restore them after waking up.
     adcsra_backup = ADCSRA;
     acsr_backup = ACSR;
     prr0_backup = PRR0;
     prr1_backup = PRR1;
 
-    /* Disable analog blocks and clock-gate unused peripherals during sleep. */
+    // Disable analog blocks and clock-gate unused peripherals during sleep.
     ADCSRA &= (uint8_t)~(1 << ADEN);
     ACSR |= (1 << ACD);
     PRR0 = 0xFFu;
@@ -169,7 +211,7 @@ static void enter_low_power_until_keypad(void)
     PCIFR |= (1 << PCIF2);
     mark_activity();
 }
-
+// Converts input digits into a floor number.
 static uint8_t digits_to_floor(void)
 {
     return g_input_len == 1u
@@ -177,11 +219,16 @@ static uint8_t digits_to_floor(void)
         : (uint8_t)(g_input_digits[0] * 10u + g_input_digits[1]);
 }
 
+// Check that input digit is a number, not a command key.
 static bool is_digit(uint8_t key)
 {
     return (key >= '0' && key <= '9');
 }
-
+/*
+ * Handling of floor requests to elevator queue.
+ * If the request is the same floor as the current one enter FAULT state as per assignment.
+ * Else if the queue is full display queue is full message on LCD. Otherwise add the request to the queue.
+*/
 static void submit_floor_request(uint8_t floor)
 {
     if (floor == g_current_floor && g_state == STATE_IDLE && queue_is_empty(&g_queue)) {

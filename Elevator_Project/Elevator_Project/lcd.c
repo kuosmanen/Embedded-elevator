@@ -22,6 +22,18 @@
        See the C include lcd.h file for a description of each function
        
 *****************************************************************************/
+
+/*
+ * In this project the Mega uses this library to show:
+ * - idle / choose floor messages
+ * - current floor while moving
+ * - door open / door closing messages
+ * - obstacle and fault messages
+ * 
+ * This is mostly just standard LCD driver code and was not written
+ * specifically for this project.
+ */
+
 #include <inttypes.h>
 #include <avr/io.h>
 #include <avr/pgmspace.h>
